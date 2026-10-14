@@ -1,3 +1,4 @@
+use crate::core::sort::SortOrder;
 use super::*;
 
 /// Every sidebar row with what it needs; `App::library_rows` is the filtered list.
@@ -324,6 +325,9 @@ impl App {
         SortField::ReleaseDate => sort_by_key_with_order(&mut page.items, sort_state.order, |a| {
           a.album.release_date.clone()
         }),
+        SortField::Default => {
+          sort_by_key_with_order(&mut page.items, SortOrder::Descending, |a| a.added_at.clone())
+        }
         _ => {}
       }
     }
@@ -1489,5 +1493,34 @@ mod tests {
       rx.try_recv(),
       Ok(IoEvent::GetCurrentSavedTracks(None))
     ));
+  }
+
+  fn collect_ids(page: &Paged<SavedAlbumInfo>) -> Vec<&str> {
+    page.items.iter().map(|item| {item.album.id.as_deref().unwrap()}).collect()
+  }
+
+  #[test]
+  fn default_sort_restores_the_saved_album_library_order() {
+    let (tx, _rx) = channel();
+    let mut app = App::new(tx, UserConfig::new(), Some(SystemTime::now()));
+    let mut page = saved_album_page(0, &["uwu", "nya", "owo"], false);
+    let added = [
+      "2069-01-00T00:00:00+07:00",
+      "2026-10-14T20:35:35+07:00",
+      "0001-01-01T00:00:00+07:00",
+    ];
+    for (item, at) in page.items.iter_mut().zip(added) {
+      item.added_at = at.to_string();
+      item.album.name = item.album.id.clone().unwrap();
+    }
+    app.library.saved_albums.upsert_page_by_offset(page);
+
+    app.apply_sort_field(SortContext::SavedAlbums, SortField::Name);
+    let ids_scrambled = collect_ids(&app.library.saved_albums.pages[0]);
+    assert_eq!(ids_scrambled, ["nya", "owo", "uwu"]);
+
+    app.apply_sort_field(SortContext::SavedAlbums, SortField::Default);
+    let ids_default = collect_ids(&app.library.saved_albums.pages[0]);
+    assert_eq!(ids_default, ["uwu", "nya", "owo"]);
   }
 }
